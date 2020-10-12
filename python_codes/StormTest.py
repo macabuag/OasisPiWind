@@ -38,7 +38,9 @@ import storm_database as sd
 admin = Path.cwd() / 'inputs'/ 'gadm36_GLP_shp' / 'gadm36_GLP_0.shp'
 gar = Path.cwd() / 'inputs'/ 'lac_glp' / 'lac_glp.shp'
 #ibtracs = Path.cwd() / 'inputs'/ 'IBTrACS' / 'Georges1998.csv'
-storm = Path.cwd() / 'inputs' / 'STORM' / 'storm370805.csv'
+#storm = Path.cwd() / 'inputs' / 'STORM' / 'storm370805.csv' #this is a single event
+storm = Path.cwd() / 'inputs' / 'STORM' / 'STORM_DATA_IBTRACS_NA.csv'
+
 intensity_dic = Path.cwd() / 'inputs'/ 'Oasis_original' / 'intensity_bin_dict_modified.csv'
 
 vulnerability = Path.cwd() / 'inputs'/ 'vulnerability' / '37.csv'
@@ -62,6 +64,8 @@ fp_vf = Path.cwd() / 'outputs' / 'csv' / 'vulnerability_function.csv'
 fp_vf_dic = Path.cwd() / 'outputs' / 'csv' / 'vulnerability_dict.csv'
 fp_groupby_vf1 = Path.cwd() / 'outputs' / 'csv' / 'combine_vulnerability_damage.csv'
 fp_vulnerability = Path.cwd() / 'outputs' / 'csv' / 'vulnerability.csv'
+fp_events = Path.cwd() / 'outputs' / 'csv' / 'events_p.csv'
+fp_occurrence = Path.cwd() / 'outputs' / 'csv' / 'occurrence_lt.csv'
 
 path_vf = 'outputs/vulnerability_functions/{}.csv'
 path_vf_png = Path.cwd() / 'outputs' / 'vulnerability_functions'
@@ -477,11 +481,11 @@ def merge_wind_w_grid(wind_points, grid_centro):
     
     df ['Vc_mph'] = get_mph(df['Vc_ms']) 
     #save the combine dataframe as csv file
-    df.to_csv(fp_combine_1, index=False)
+    #df.to_csv(fp_combine_1, index=False)
     return df
 
 def groupby_grid(df):
-    df_max = df.groupby(['AREA_PERIL_ID', 'Centro_Lon', 'Centro_Lat' ], as_index=False).agg({
+    df_max = df.groupby(['AREA_PERIL_ID', 'Centro_Lon', 'Centro_Lat', 'event_id' ], as_index=False).agg({
     'Vc_mph': max, 
     'r_km': min, 
     'RMW_km': max,
@@ -489,20 +493,20 @@ def groupby_grid(df):
     'B': 'mean'}).reset_index().copy()
     #print(df_max.info())
     #print(df_max.head())
-    df_max.to_csv(fp_groupby_1, index=False)
+    #df_max.to_csv(fp_groupby_1, index=False)
     return df_max
 
 def intensity_lookup(df_intensity, df_max):
     
     #create a key called 'event_id' for merging the dataframe
-    df_max = df_max.assign(event_id=1).merge(
-        df_intensity.assign(event_id=1), on='event_id', how='outer')
+    df_max = df_max.assign(key=1).merge(
+        df_intensity.assign(key=1), on='key', how='outer')
     
     #merge the two database
     df_merge = df_max[(df_max['bin_from'] < df_max['Vc_mph']) 
                       &  (df_max['bin_to'] > df_max['Vc_mph'])]
     #export as csv
-    df_merge.to_csv(fp_groupby_2, index=False)
+    #df_merge.to_csv(fp_groupby_2, index=False)
     #print(df_merge.head())
     return df_merge
     
@@ -603,7 +607,7 @@ def get_values_vf(df_vf):
     
     #print(df_val_vf.tail())
     #save as csv
-    df_val_vf.to_csv(fp_vf, index=False)
+    #df_val_vf.to_csv(fp_vf, index=False)
     return df_val_vf
 
 def plot_values_vf(df_val_vf):
@@ -621,7 +625,7 @@ def plot_values_vf(df_val_vf):
     #plt.savefig(os.getcwd()+ file +'.pdf',figsize=(5,5),dpi=600)
     plt.show()
     
-def vulnerability_dic(df_val_vf, OccupancyCode):
+def vulnerability_dic(df_val_vf):# OccupancyCode):
     
     select_columns = ['ID_set', 'Name', 'Coverage', 'Hazard']
     df = df_val_vf[select_columns].copy()
@@ -646,7 +650,8 @@ def vulnerability_dic(df_val_vf, OccupancyCode):
     #df.loc[(df.Coverage == 'Buildings'), 'COVERAGE_TYPE'] = 3 #this should be a different coverage in the vulnerability dataset
        
     #occupancy code
-    df.loc[(df.Name == 'C1M L EDU PRIVATE'), 'OCCUPANCYCODE'] = OccupancyCode
+    #df.loc[(df.Name == 'C1M L EDU PRIVATE'), 'OCCUPANCYCODE'] = 1102 #change occupancy code
+    df['OCCUPANCYCODE'] = 1102
     
     # columns as in oasis
     columns_oasis = ['PERIL_ID', 'COVERAGE_TYPE', 'OCCUPANCYCODE', 'VULNERABILITY_ID']
@@ -692,7 +697,7 @@ def damage_intensity_lookup(df_val_vf, df_damage_dic, df_intensity):
     #df_merge2.loc[:,'probability'] = 1
     
     #export as csv
-    df_merge2.to_csv(fp_groupby_vf1, index=False)
+    #df_merge2.to_csv(fp_groupby_vf1, index=False)
     
     return df_merge2
 
@@ -724,7 +729,47 @@ def get_vulnerability(df_merge_2):
     
     return df_osasis_vulnerability
     
+### Events
+
+def unique_events(df):
+    """ Create a dataframe with the unique event_id and save as csv file 
+    as input files for oasis"""
     
+    df_events = df.filter(['event_id'], axis=1)
+    df_events = df.event_id.drop_duplicates()  
+
+    df_osasis_events = pd.DataFrame(df_events)
+       
+    #save as csv
+    df_osasis_events.to_csv(fp_events, index=False)
+    
+    return df_osasis_events
+
+def occurence(df):
+    """ create a dataframe with the unique event_id and correspondent occurence;
+    save it as csv file for oasis lmf"""
+    
+    occurence = df.filter(['event_id', 'Year', 'Month'], axis=1)
+    occurence = occurence.drop_duplicates()
+    
+    df_occurence = pd.DataFrame(occurence)
+    
+    #column names as in oeasis
+    df_occurence['period_no'] = df_occurence.Year
+    df_occurence['occ_year'] = df_occurence.Year
+    df_occurence['occ_month'] = df_occurence.Month
+    df_occurence['occ_day'] = df_occurence.Month
+    
+    #select columns
+    columns_selected = ['event_id', 'period_no', 'occ_year', 'occ_month', 'occ_day' ]
+    
+    df_osasis_occurence = df_occurence[columns_selected]
+    
+  
+    #save as csv
+    df_osasis_occurence.to_csv(fp_occurrence, index=False)
+    
+    return df_osasis_occurence
 
 
 ################################ MAIN #########################################
@@ -772,8 +817,11 @@ def main():
     ### Windfield
     
     # load the data
-    df_event = sd.load_STORM_single(storm)
-    #print(df_event.info())
+    df_event = sd.load_STORM_analysis(storm)
+    
+    
+    list_events = unique_events(df_event)
+    df_occurence = occurence(df_event)
 
     #trasform it to a geodataframe
     gdf_event = wnf.geolocalization(df_event)
@@ -799,14 +847,14 @@ def main():
     ### vulnerability
     glp_vf_1 = load_vf(vulnerability)
       
-    vulnerability_dictionary = vulnerability_dic(glp_vf_1, OccupancyCode = 1102 ) #change this accordinly to the exposure
+    vulnerability_dictionary = vulnerability_dic(glp_vf_1)#, 1102 ) #change this accordinly to the exposure
     
     df_glp_vf_1 = get_values_vf(glp_vf_1)
-    plot = plot_values_vf(df_glp_vf_1) # awful graphic, but the plot is correct
+    #plot = plot_values_vf(df_glp_vf_1) # awful graphic, but the plot is correct
     
     #damage dictionary
     df_damage =  load_damage_dic(damage_dic)
-    print(df_damage.info())
+    #print(df_damage.info())
     
     # combine damage and vulnerability
     df_lookup_2 = damage_intensity_lookup(df_glp_vf_1, df_damage, df_intensity)

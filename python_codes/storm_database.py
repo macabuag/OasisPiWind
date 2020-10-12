@@ -16,6 +16,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt 
 from shapely.geometry import Polygon, MultiPoint, Point, box
 import pprint
+import re
 
 from matplotlib.colorbar import Colorbar
 from matplotlib.offsetbox import AnchoredText
@@ -42,7 +43,7 @@ admin = Path.cwd() / 'inputs'/ 'gadm36_GLP_shp' / 'gadm36_GLP_0.shp'
 fp_storm = Path.cwd() / 'inputs' / 'STORM' / 'STORM_DATA_IBTRACS_NA_1000_YEARS_0.txt' #STORM database
 
 # output files
-fp_storm_csv = Path.cwd() / 'inputs' / 'STORM' / 'STORM_DATA_IBTRACS_NA_1000_YEARS_0.csv'
+fp_storm_csv = Path.cwd() / 'inputs' / 'STORM' / 'STORM_DATA_IBTRACS_NA.csv'
 fp_storm_selection = Path.cwd() / 'inputs' / 'STORM' / 'selection.csv'
 fp_storm_shp = Path.cwd() / 'outputs' / 'shapefiles' / 'storm.shp'
 
@@ -50,9 +51,9 @@ fp_storm_shp = Path.cwd() / 'outputs' / 'shapefiles' / 'storm.shp'
 
 # load a textfile the from storm database
 
-def load_STORM(path):
+def load_STORM(file, filenumber):
     """ import txt files, add the header, add an ID column and export as csv"""
-    df = pd.read_csv(path, sep=",", header = None, skiprows=[0],
+    df = pd.read_csv(file, sep=",", header = None, skiprows=[0],
                      names=("Year", "Month", "TCnumber", "TimeStep", "BasinID", 
                             "Lat", "Lon","Press_hPa", "Vmax_ms", "RMW_km",
                             "Category", "Landfall", "Dist_km")) 
@@ -61,16 +62,47 @@ def load_STORM(path):
     df['V'] = df['Vmax_ms']
     df.loc[:,'category'] = df.apply(wnf.get_wind_category,axis=1)
     
-    #set ID column
-    df['ID_event'] = df.Year.astype(str) + '_' +  df.Month.astype(str) + '_' +  df.TCnumber.astype(str)
+    #add file name
+    df['source'] = file.name
+    df['filenumber'] = filenumber
+    df['Year'] = df.Year.astype(int)
+    df['Month'] = df.Month.astype(int)
+    df['TCnumber'] = df.TCnumber.astype(int)
     
+    #set ID column
+    #df['ID_event'] = df.filenumber.astype(str) + '_' + df.Year.astype(str) + '_' +  df.Month.astype(str) + '_' +  df.TCnumber.astype(str)
+    df['ID_event'] = df.filenumber.astype(str) + df.Year.astype(str) +  df.Month.astype(str) +  df.TCnumber.astype(str)
     # clean the dataframe   
-    usecols = ['ID_event','TimeStep', 'Lat', 'Lon','Vmax_ms', 'RMW_km', 'category']  
+    usecols = ['ID_event','Year', 'Month', 'TimeStep', 'Lat', 'Lon','Vmax_ms', 'RMW_km', 'category', 'source']  
     df_clean = df[usecols].copy() 
     
     # save as csv
-    df_clean.to_csv(fp_storm_csv, index=False)
+    #df_clean.to_csv(fp_storm_csv, index=False)
     return df_clean
+
+def load_multiple_STORM():
+    source_files = sorted(Path('inputs/STORM/').glob('*.txt'))
+    gdf_admin = gt.get_admin(admin, projected_crs = "EPSG:2970" )
+    gdf_admin_centroid = centroid_admin(gdf_admin)
+
+    dataframes = []
+    filenumber = 0
+    for file in source_files:
+        df_storm = load_STORM(file, filenumber)
+        gdf_storm = wnf.geolocalization(df_storm)
+        storm_dist = get_distance(gdf_storm, gdf_admin_centroid)
+        df = select_events(storm_dist, distance = 25, category = 5) 
+        filenumber += 1
+        
+        dataframes.append(df)
+
+    database = pd.concat(dataframes)
+    
+    # save as csv
+    database.to_csv(fp_storm_csv, index=False)
+    
+    return database
+
 
 def centroid_admin(gdf_admin):
     gdf_admin_centroid = gdf_admin.copy()
@@ -113,22 +145,26 @@ def select_events(df_wind, distance, category):
     events_ID2 = df2.ID_event.unique()
        
     #clean dataframe
-    columns_selection = ['ID_event', 'TimeStep', 'Lat', 'Lon', 'Vmax_ms',
-                         'RMW_km', 'category', 'r_km']
+    columns_selection = ['ID_event', 'Year', 'Month', 
+                         'TimeStep', 'Lat', 'Lon', 'Vmax_ms',
+                         'RMW_km', 'category', 'r_km', 
+                         'source']
     
     df3 = df1[columns_selection].copy()
     df3 = df3.loc[df3['ID_event'].isin(events_ID2)]
     
     print(df3.info())
     #save as csv
-    df3.to_csv(fp_storm_selection, index=False)
+    #df3.to_csv(fp_storm_selection, index=False)
     #save shapefile
     gdf = wnf.geolocalization(df3)
-    gdf.to_file(fp_storm_shp)
+    #gdf.to_file(fp_storm_shp)
     return gdf
   
-def load_STORM_single(fp):
+def load_STORM_analysis(fp):
     df = pd.read_csv(fp, sep=",")
+    #rename column
+    df.rename(columns={'ID_event':'event_id'}, inplace=True)
 
     #estimate B_shape factor
     df['B'] = wnf.B_P05(df['Vmax_ms'], df['Lat'])
@@ -143,6 +179,10 @@ def load_STORM_single(fp):
 def main():
     #load storm events
     #df_storm = load_STORM(fp_storm)
+    
+    #load multiple txt files from STORM
+    df_storm = load_multiple_STORM()
+    
     #print(df_storm.info())
     #gdf_storm = wnf.geolocalization(df_storm)
     
@@ -156,10 +196,10 @@ def main():
     #print(storm_dist.info())
     #print(storm_dist.head())
     
-    #selection = select_events(storm_dist, distance = 250, category = 4) #add max distance in km
+    #selection = select_events(storm_dist, distance = 50, category = 5) #add max distance in km
     
     # load single event after cleaning
-    df = load_STORM_single(fp)
+    #df = load_STORM_single(fp)
     
 ##############################################################################
 if __name__ == "__main__":
