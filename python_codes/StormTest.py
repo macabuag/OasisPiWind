@@ -67,6 +67,8 @@ fp_vulnerability = Path.cwd() / 'outputs' / 'csv' / 'vulnerability.csv'
 fp_events = Path.cwd() / 'outputs' / 'csv' / 'events_p.csv'
 fp_occurrence = Path.cwd() / 'outputs' / 'csv' / 'occurrence_lt.csv'
 
+fp_test = Path.cwd() / 'outputs' / 'csv' / 'test.csv'
+
 path_vf = 'outputs/vulnerability_functions/{}.csv'
 path_vf_png = Path.cwd() / 'outputs' / 'vulnerability_functions'
 
@@ -526,7 +528,7 @@ def get_footprint(df_merge):
     df_footprint = df_footprint.rename(columns = {
         'AREA_PERIL_ID':'areaperil_id',
         'bin_index':'intensity_bin_id'})
-    
+    df_footprint =  df_footprint.sort_values(by=['event_id', 'areaperil_id'])
     #save as csv
     df_footprint.to_csv(fp_footprint, index=False)
     return df_footprint
@@ -735,23 +737,46 @@ def unique_events(df):
     """ Create a dataframe with the unique event_id and save as csv file 
     as input files for oasis"""
     
-    df_events = df.filter(['event_id'], axis=1)
-    df_events = df.event_id.drop_duplicates()  
+    events = df.filter(['ID_event', 'Year', 'Month'], axis=1)
+    events = events.drop_duplicates()  
 
-    df_osasis_events = pd.DataFrame(df_events)
+    df_events = pd.DataFrame(events)
+    df_events = df_events.reset_index()
+    df_events['event_id'] = df_events.index + 1
+    
+    df_events = df_events.drop(['index'], axis=1)
+    
+    #export as csv
+    #df_events.to_csv(fp_test, index=False)
+    
+    return df_events
+
+def merge_unique_events_windtrack(df_events, windtrack):
+    """ add the oasis event_id number to the windtrack dataframe"""
+    
+    df = pd.merge(windtrack,df_events, on="ID_event")
+    
+    #export as csv
+    df.to_csv(fp_test, index=False)
+    return df
+    
+
+def oasis_events(df_events):
+    df_osasis_events = df_events.copy()
+    df_osasis_events = df_osasis_events.drop(['ID_event', 'Year', 'Month'], axis=1)
+    print(df_osasis_events.info())
        
     #save as csv
     df_osasis_events.to_csv(fp_events, index=False)
     
-    return df_osasis_events
-
-def occurence(df):
+def oasis_occurence(df_events):
     """ create a dataframe with the unique event_id and correspondent occurence;
     save it as csv file for oasis lmf"""
     
-    occurence = df.filter(['event_id', 'Year', 'Month'], axis=1)
-    occurence = occurence.drop_duplicates()
+    occurence = df_events.copy()
+    occurence = occurence.drop(['ID_event'], axis=1)
     
+   
     df_occurence = pd.DataFrame(occurence)
     
     #column names as in oeasis
@@ -765,6 +790,7 @@ def occurence(df):
     
     df_osasis_occurence = df_occurence[columns_selected]
     
+    print(df_osasis_occurence.info())
   
     #save as csv
     df_osasis_occurence.to_csv(fp_occurrence, index=False)
@@ -817,14 +843,15 @@ def main():
     ### Windfield
     
     # load the data
-    df_event = sd.load_STORM_analysis(storm)
+    df_windtrack = sd.load_STORM_analysis(storm)   
     
-    
-    list_events = unique_events(df_event)
-    df_occurence = occurence(df_event)
+    list_events = unique_events(df_windtrack)
+    df_oasis_events = oasis_events(list_events)
+    df_oasis_occurence = oasis_occurence(list_events)
+    df_wind = merge_unique_events_windtrack(list_events, df_windtrack)
 
     #trasform it to a geodataframe
-    gdf_event = wnf.geolocalization(df_event)
+    gdf_event = wnf.geolocalization(df_wind)
 
     # save the windtrack as shapefile
     gdf_event.to_file(fp_wind, driver='ESRI Shapefile')

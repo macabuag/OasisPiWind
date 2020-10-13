@@ -164,7 +164,7 @@ def select_events(df_wind, distance, category):
 def load_STORM_analysis(fp):
     df = pd.read_csv(fp, sep=",")
     #rename column
-    df.rename(columns={'ID_event':'event_id'}, inplace=True)
+    #df.rename(columns={'ID_event':'event_id'}, inplace=True)
 
     #estimate B_shape factor
     df['B'] = wnf.B_P05(df['Vmax_ms'], df['Lat'])
